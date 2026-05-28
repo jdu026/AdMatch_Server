@@ -1,0 +1,13 @@
+export enum OfferStatus {
+  SENT = 'SENT',
+  ACCEPTED = 'ACCEPTED',
+  REJECTED = 'REJECTED',
+  COUNTERED = 'COUNTERED',
+  CANCELED = 'CANCELED',
+}
+
+export enum MatchStatus {
+  IN_PROGRESS = 'IN_PROGRESS',
+  COMPLETED = 'COMPLETED',
+  CANCELED = 'CANCELED',
+}
