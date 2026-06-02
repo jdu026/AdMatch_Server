@@ -1,109 +1,148 @@
-import { Injectable, NotFoundException, ForbiddenException, ConflictException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { Offer } from './entities/offer.entity';
-import { OfferStatus, MatchStatus } from '../common/enums/status.enum';
-import { CreateOfferDto, CounterOfferDto, RejectOfferDto } from './dto/offer.dto';
-import { Match } from '../matches/entities/match.entity';
+import { toOfferDto } from '../common/mappers';
+import { CampaignEntity } from '../campaigns/entities/campaign.entity';
+import { NotificationsService } from '../notifications/notifications.service';
+import { User } from '../user/entities/user.entity';
+import { CreateOfferDto } from './dto/create-offer.dto';
+import { OfferEntity, OfferStatus } from './entities/offer.entity';
 
 @Injectable()
 export class OffersService {
   constructor(
-    @InjectRepository(Offer)
-    private readonly offerRepository: Repository<Offer>,
-    @InjectRepository(Match)
-    private readonly matchRepository: Repository<Match>,
+    @InjectRepository(OfferEntity)
+    private readonly offers: Repository<OfferEntity>,
+    @InjectRepository(CampaignEntity)
+    private readonly campaigns: Repository<CampaignEntity>,
+    @InjectRepository(User)
+    private readonly users: Repository<User>,
+    private readonly notifications: NotificationsService,
   ) {}
 
-  async create(advertiserId: string, createOfferDto: CreateOfferDto): Promise<Offer> {
-    const offer = this.offerRepository.create({
-      ...createOfferDto,
-      advertiserId,
-      status: OfferStatus.SENT,
-    });
-    return await this.offerRepository.save(offer);
-  }
-
-  async findAll(userId: string, role: 'advertiser' | 'model'): Promise<Offer[]> {
-    const where = role === 'advertiser' ? { advertiserId: userId } : { modelId: userId };
-    return await this.offerRepository.find({
+  async findMine(userId: string, role: string) {
+    const where =
+      role === 'MODEL'
+        ? { modelId: userId }
+        : { advertiserId: userId };
+    const rows = await this.offers.find({
       where,
       order: { createdAt: 'DESC' },
     });
+    return rows.map(toOfferDto);
   }
 
-  async findOne(id: string): Promise<Offer> {
-    const offer = await this.offerRepository.findOne({ where: { id } });
-    if (!offer) {
-      throw new NotFoundException(`Offer with ID ${id} not found`);
-    }
-    return offer;
+  async findOne(id: string) {
+    const row = await this.offers.findOne({ where: { id } });
+    if (!row) throw new NotFoundException('제안을 찾을 수 없습니다.');
+    return toOfferDto(row);
   }
 
-  async accept(id: string, modelId: string): Promise<Match> {
-    const offer = await this.findOne(id);
-    if (offer.modelId !== modelId) {
-      throw new ForbiddenException('You do not have permission to accept this offer');
-    }
-    if (offer.status !== OfferStatus.SENT && offer.status !== OfferStatus.COUNTERED) {
-      throw new ConflictException(`Cannot accept offer with status ${offer.status}`);
-    }
-
-    offer.status = OfferStatus.ACCEPTED;
-    await this.offerRepository.save(offer);
-
-    // 매칭 생성
-    const match = this.matchRepository.create({
-      offerId: offer.id,
-      campaignId: offer.campaignId,
-      advertiserId: offer.advertiserId,
-      modelId: offer.modelId,
-      status: MatchStatus.IN_PROGRESS,
+  async create(
+    actorId: string,
+    role: string,
+    dto: CreateOfferDto,
+  ) {
+    const campaign = await this.campaigns.findOne({
+      where: { id: dto.campaignId },
     });
-    return await this.matchRepository.save(match);
+    if (!campaign) throw new NotFoundException('캠페인을 찾을 수 없습니다.');
+    if (campaign.status !== 'OPEN') {
+      throw new BadRequestException('마감된 캠페인입니다.');
+    }
+
+    let advertiserId = campaign.advertiserId;
+    let modelId = dto.modelId ?? '';
+
+    if (role === 'ADVERTISER') {
+      if (actorId !== campaign.advertiserId) {
+        throw new ForbiddenException();
+      }
+      advertiserId = actorId;
+      if (!dto.modelId) {
+        throw new BadRequestException('modelId가 필요합니다.');
+      }
+      modelId = dto.modelId;
+    } else if (role === 'MODEL') {
+      modelId = actorId;
+    } else {
+      throw new ForbiddenException();
+    }
+
+    const modelUser = await this.users.findOne({
+      where: { id: Number(modelId), role: 'MODEL' },
+    });
+    if (!modelUser) {
+      throw new BadRequestException('유효한 모델이 아닙니다.');
+    }
+
+    const row = this.offers.create({
+      campaignId: dto.campaignId,
+      advertiserId,
+      modelId,
+      price: dto.price,
+      status: 'PENDING',
+    });
+    const saved = await this.offers.save(row);
+
+    const title =
+      role === 'MODEL' ? '새 캠페인 지원' : '새 제안이 도착했습니다';
+    const body =
+      role === 'MODEL'
+        ? `"${campaign.title}" 캠페인에 지원이 접수되었습니다.`
+        : `"${campaign.title}" 캠페인 제안: ${dto.price}`;
+
+    const notifyUserId = role === 'MODEL' ? advertiserId : modelId;
+    await this.notifications.create(notifyUserId, title, body);
+
+    return toOfferDto(saved);
   }
 
-  async reject(id: string, modelId: string, rejectOfferDto: RejectOfferDto): Promise<Offer> {
-    const offer = await this.findOne(id);
-    if (offer.modelId !== modelId) {
-      throw new ForbiddenException('You do not have permission to reject this offer');
-    }
-    if (offer.status !== OfferStatus.SENT && offer.status !== OfferStatus.COUNTERED) {
-      throw new ConflictException(`Cannot reject offer with status ${offer.status}`);
+  async updateStatus(
+    id: string,
+    actorId: string,
+    role: string,
+    status: OfferStatus,
+  ) {
+    const row = await this.offers.findOne({ where: { id } });
+    if (!row) throw new NotFoundException('제안을 찾을 수 없습니다.');
+
+    if (role === 'MODEL') {
+      if (row.modelId !== actorId) throw new ForbiddenException();
+    } else if (role === 'ADVERTISER') {
+      if (row.advertiserId !== actorId) throw new ForbiddenException();
+    } else {
+      throw new ForbiddenException();
     }
 
-    offer.status = OfferStatus.REJECTED;
-    offer.rejectReason = rejectOfferDto.reason;
-    return await this.offerRepository.save(offer);
-  }
-
-  async counter(id: string, modelId: string, counterOfferDto: CounterOfferDto): Promise<Offer> {
-    const offer = await this.findOne(id);
-    if (offer.modelId !== modelId) {
-      throw new ForbiddenException('You do not have permission to counter this offer');
-    }
-    if (offer.status !== OfferStatus.SENT) {
-      throw new ConflictException(`Cannot counter offer with status ${offer.status}`);
+    if (status === 'ACCEPTED' || status === 'REJECTED') {
+      if (role !== 'MODEL') {
+        throw new ForbiddenException('모델만 수락/거절할 수 있습니다.');
+      }
     }
 
-    offer.status = OfferStatus.COUNTERED;
-    offer.counterPrice = counterOfferDto.counterPrice;
-    offer.counterStartDate = new Date(counterOfferDto.counterStartDate);
-    offer.counterEndDate = new Date(counterOfferDto.counterEndDate);
-    offer.message = counterOfferDto.message || offer.message;
-    return await this.offerRepository.save(offer);
-  }
+    row.status = status;
+    await this.offers.save(row);
 
-  async cancel(id: string, advertiserId: string): Promise<Offer> {
-    const offer = await this.findOne(id);
-    if (offer.advertiserId !== advertiserId) {
-      throw new ForbiddenException('You do not have permission to cancel this offer');
-    }
-    if (offer.status !== OfferStatus.SENT && offer.status !== OfferStatus.COUNTERED) {
-      throw new ConflictException(`Cannot cancel offer with status ${offer.status}`);
+    if (status === 'ACCEPTED') {
+      await this.notifications.create(
+        row.advertiserId,
+        '제안 수락',
+        '모델이 제안을 수락했습니다. 채팅에서 일정을 조율해 보세요.',
+      );
+    } else if (status === 'REJECTED') {
+      await this.notifications.create(
+        row.advertiserId,
+        '제안 거절',
+        '모델이 제안을 거절했습니다.',
+      );
     }
 
-    offer.status = OfferStatus.CANCELED;
-    return await this.offerRepository.save(offer);
+    return toOfferDto(row);
   }
 }

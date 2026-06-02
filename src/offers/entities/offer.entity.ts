@@ -1,57 +1,32 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, ManyToOne, JoinColumn } from 'typeorm';
-import { OfferStatus } from '../../common/enums/status.enum';
+import {
+  Column,
+  CreateDateColumn,
+  Entity,
+  PrimaryGeneratedColumn,
+} from 'typeorm';
+
+export type OfferStatus = 'PENDING' | 'ACCEPTED' | 'REJECTED' | 'COMPLETED';
 
 @Entity('offers')
-export class Offer {
+export class OfferEntity {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column()
+  @Column({ name: 'campaign_id' })
   campaignId: string;
 
-  @Column()
+  @Column({ name: 'advertiser_id' })
   advertiserId: string;
 
-  @Column()
+  @Column({ name: 'model_id' })
   modelId: string;
 
-  @Column({ type: 'bigint' })
-  price: number;
+  @Column({ length: 80 })
+  price: string;
 
-  @Column({ type: 'timestamp' })
-  startDate: Date;
-
-  @Column({ type: 'timestamp' })
-  endDate: Date;
-
-  @Column({ type: 'text', nullable: true })
-  scope: string;
-
-  @Column({ type: 'text', nullable: true })
-  message: string;
-
-  @Column({
-    type: 'enum',
-    enum: OfferStatus,
-    default: OfferStatus.SENT,
-  })
+  @Column({ type: 'varchar', length: 12, default: 'PENDING' })
   status: OfferStatus;
 
-  @Column({ type: 'bigint', nullable: true })
-  counterPrice: number;
-
-  @Column({ type: 'timestamp', nullable: true })
-  counterStartDate: Date;
-
-  @Column({ type: 'timestamp', nullable: true })
-  counterEndDate: Date;
-
-  @Column({ type: 'text', nullable: true })
-  rejectReason: string;
-
-  @CreateDateColumn()
+  @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
-
-  @UpdateDateColumn()
-  updatedAt: Date;
 }

@@ -1,11 +1,16 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { CampaignsService } from './campaigns.service';
+import { AuthModule } from '../auth/auth.module';
+import { User } from '../user/entities/user.entity';
 import { CampaignsController } from './campaigns.controller';
-import { Campaign } from './entities/campaign.entity';
+import { CampaignsService } from './campaigns.service';
+import { CampaignEntity } from './entities/campaign.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Campaign])],
+  imports: [
+    TypeOrmModule.forFeature([CampaignEntity, User]),
+    AuthModule,
+  ],
   controllers: [CampaignsController],
   providers: [CampaignsService],
   exports: [CampaignsService],

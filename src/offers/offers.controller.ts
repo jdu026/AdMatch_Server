@@ -1,49 +1,69 @@
-import { Controller, Get, Post, Body, Param, Req, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Patch,
+  Post,
+  UseGuards,
+} from '@nestjs/common';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { CurrentAuthUser } from '../auth/current-user.decorator';
+import { InjectRepository } from '@nestjs/typeorm';
+import { NotFoundException } from '@nestjs/common';
+import { Repository } from 'typeorm';
+import { User } from '../user/entities/user.entity';
+import { CreateOfferDto } from './dto/create-offer.dto';
+import { UpdateOfferStatusDto } from './dto/update-offer-status.dto';
 import { OffersService } from './offers.service';
-import { CreateOfferDto, CounterOfferDto, RejectOfferDto } from './dto/offer.dto';
 
 @Controller('offers')
 export class OffersController {
-  constructor(private readonly offersService: OffersService) {}
+  constructor(
+    private readonly offersService: OffersService,
+    @InjectRepository(User)
+    private readonly users: Repository<User>,
+  ) {}
 
-  @Post()
-  create(@Body() createOfferDto: CreateOfferDto, @Req() req: any) {
-    const advertiserId = req.headers['x-user-id'] || req.user?.id || 'test-advertiser-id';
-    return this.offersService.create(advertiserId, createOfferDto);
-  }
-
-  @Get()
-  findAll(@Req() req: any, @Query('role') role: 'advertiser' | 'model') {
-    const userId = req.headers['x-user-id'] || req.user?.id || 'test-user-id';
-    return this.offersService.findAll(userId, role);
+  @Get('mine')
+  @UseGuards(JwtAuthGuard)
+  async findMine(@CurrentAuthUser() u: { userId: string }) {
+    const user = await this.users.findOne({ where: { id: Number(u.userId) } });
+    if (!user) throw new NotFoundException();
+    return this.offersService.findMine(u.userId, user.role);
   }
 
   @Get(':id')
+  @UseGuards(JwtAuthGuard)
   findOne(@Param('id') id: string) {
     return this.offersService.findOne(id);
   }
 
-  @Post(':id/accept')
-  accept(@Param('id') id: string, @Req() req: any) {
-    const modelId = req.headers['x-user-id'] || req.user?.id || 'test-model-id';
-    return this.offersService.accept(id, modelId);
+  @Post()
+  @UseGuards(JwtAuthGuard)
+  async create(
+    @CurrentAuthUser() u: { userId: string },
+    @Body() dto: CreateOfferDto,
+  ) {
+    const user = await this.users.findOne({ where: { id: Number(u.userId) } });
+    if (!user) throw new NotFoundException();
+    return this.offersService.create(u.userId, user.role, dto);
   }
 
-  @Post(':id/reject')
-  reject(@Param('id') id: string, @Body() rejectOfferDto: RejectOfferDto, @Req() req: any) {
-    const modelId = req.headers['x-user-id'] || req.user?.id || 'test-model-id';
-    return this.offersService.reject(id, modelId, rejectOfferDto);
-  }
-
-  @Post(':id/counter')
-  counter(@Param('id') id: string, @Body() counterOfferDto: CounterOfferDto, @Req() req: any) {
-    const modelId = req.headers['x-user-id'] || req.user?.id || 'test-model-id';
-    return this.offersService.counter(id, modelId, counterOfferDto);
-  }
-
-  @Post(':id/cancel')
-  cancel(@Param('id') id: string, @Req() req: any) {
-    const advertiserId = req.headers['x-user-id'] || req.user?.id || 'test-advertiser-id';
-    return this.offersService.cancel(id, advertiserId);
+  @Patch(':id/status')
+  @UseGuards(JwtAuthGuard)
+  async updateStatus(
+    @CurrentAuthUser() u: { userId: string },
+    @Param('id') id: string,
+    @Body() dto: UpdateOfferStatusDto,
+  ) {
+    const user = await this.users.findOne({ where: { id: Number(u.userId) } });
+    if (!user) throw new NotFoundException();
+    return this.offersService.updateStatus(
+      id,
+      u.userId,
+      user.role,
+      dto.status,
+    );
   }
 }

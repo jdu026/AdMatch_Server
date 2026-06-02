@@ -1,12 +1,19 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { OffersService } from './offers.service';
+import { AuthModule } from '../auth/auth.module';
+import { CampaignEntity } from '../campaigns/entities/campaign.entity';
+import { NotificationsModule } from '../notifications/notifications.module';
+import { User } from '../user/entities/user.entity';
+import { OfferEntity } from './entities/offer.entity';
 import { OffersController } from './offers.controller';
-import { Offer } from './entities/offer.entity';
-import { Match } from '../matches/entities/match.entity';
+import { OffersService } from './offers.service';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Offer, Match])],
+  imports: [
+    TypeOrmModule.forFeature([OfferEntity, CampaignEntity, User]),
+    NotificationsModule,
+    AuthModule,
+  ],
   controllers: [OffersController],
   providers: [OffersService],
   exports: [OffersService],

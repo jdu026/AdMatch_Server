@@ -1,54 +1,71 @@
-import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { Campaign } from './entities/campaign.entity';
-import { CreateCampaignDto, UpdateCampaignDto } from './dto/campaign.dto';
+import { toCampaignDto } from '../common/mappers';
+import { CreateCampaignDto } from './dto/create-campaign.dto';
+import { CampaignEntity } from './entities/campaign.entity';
 
 @Injectable()
 export class CampaignsService {
   constructor(
-    @InjectRepository(Campaign)
-    private readonly campaignRepository: Repository<Campaign>,
+    @InjectRepository(CampaignEntity)
+    private readonly campaigns: Repository<CampaignEntity>,
   ) {}
 
-  async create(advertiserId: string, createCampaignDto: CreateCampaignDto): Promise<Campaign> {
-    const campaign = this.campaignRepository.create({
-      ...createCampaignDto,
+  async create(advertiserId: string, dto: CreateCampaignDto) {
+    const row = this.campaigns.create({
       advertiserId,
+      title: dto.title,
+      brand: dto.brand,
+      budget: dto.budget,
+      requirements: dto.requirements,
+      goals: dto.goals,
+      contentStyle: dto.contentStyle,
+      brandGuidelines: dto.brandGuidelines,
+      productDetails: dto.productDetails,
+      benefits: dto.benefits,
+      type: dto.type ?? '커머셜',
+      status: 'OPEN' as const,
     });
-    return await this.campaignRepository.save(campaign);
+    const saved = await this.campaigns.save(row);
+    return toCampaignDto(saved);
   }
 
-  async findAll(advertiserId: string): Promise<Campaign[]> {
-    return await this.campaignRepository.find({
+  async findAll(status?: 'OPEN' | 'CLOSED') {
+    const where = status ? { status } : {};
+    const rows = await this.campaigns.find({
+      where,
+      order: { createdAt: 'DESC' },
+    });
+    return rows.map(toCampaignDto);
+  }
+
+  async findMine(advertiserId: string) {
+    const rows = await this.campaigns.find({
       where: { advertiserId },
       order: { createdAt: 'DESC' },
     });
+    return rows.map(toCampaignDto);
   }
 
-  async findOne(id: string): Promise<Campaign> {
-    const campaign = await this.campaignRepository.findOne({ where: { id } });
-    if (!campaign) {
-      throw new NotFoundException(`Campaign with ID ${id} not found`);
-    }
-    return campaign;
+  async findOne(id: string) {
+    const row = await this.campaigns.findOne({ where: { id } });
+    if (!row) throw new NotFoundException('캠페인을 찾을 수 없습니다.');
+    return toCampaignDto(row);
   }
 
-  async update(id: string, advertiserId: string, updateCampaignDto: UpdateCampaignDto): Promise<Campaign> {
-    const campaign = await this.findOne(id);
-    if (campaign.advertiserId !== advertiserId) {
-      throw new ForbiddenException('You do not have permission to update this campaign');
+  async close(id: string, advertiserId: string) {
+    const row = await this.campaigns.findOne({ where: { id } });
+    if (!row) throw new NotFoundException('캠페인을 찾을 수 없습니다.');
+    if (row.advertiserId !== advertiserId) {
+      throw new ForbiddenException();
     }
-
-    Object.assign(campaign, updateCampaignDto);
-    return await this.campaignRepository.save(campaign);
-  }
-
-  async remove(id: string, advertiserId: string): Promise<void> {
-    const campaign = await this.findOne(id);
-    if (campaign.advertiserId !== advertiserId) {
-      throw new ForbiddenException('You do not have permission to delete this campaign');
-    }
-    await this.campaignRepository.remove(campaign);
+    row.status = 'CLOSED';
+    await this.campaigns.save(row);
+    return toCampaignDto(row);
   }
 }
